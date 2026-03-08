@@ -1,16 +1,49 @@
-# Ignored files for Docker build
+# Exclude unnecessary files from the Docker build context.
+# The Dockerfile performs a `git clone` of the upstream repo inside the build,
+# so the local workspace only needs to supply nginx.conf and nothing else.
 
-# Ignore the .git directory
+# ── Version control ──────────────────────────────────────────────────────────
 .git/
+.gitignore
+.gitattributes
 
-# Ignore node modules
+# ── CI/CD ────────────────────────────────────────────────────────────────────
+.github/
+
+# ── Documentation ────────────────────────────────────────────────────────────
+*.md
+LICENSE
+SECURITY.md
+
+# ── Dependency directories ───────────────────────────────────────────────────
 node_modules/
+vendor/
+.venv/
+__pycache__/
 
-# Ignore Dockerfile itself
-Dockerfile
+# ── Build artifacts ──────────────────────────────────────────────────────────
+dist/
+build/
+*.tar
+*.tar.gz
+*.zip
 
-# Ignore other development files
+# ── Development / editor files ───────────────────────────────────────────────
 *.log
 *.tmp
-*.md
-*.json
+*.swp
+*.swo
+.DS_Store
+.env
+.env.*
+*.env
+
+# ── Secrets / credentials ────────────────────────────────────────────────────
+*.pem
+*.key
+*.crt
+*.p12
+
+# ── Scan artifacts ───────────────────────────────────────────────────────────
+image-scan.tar
+build-manifest-*.json

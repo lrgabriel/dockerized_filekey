@@ -1,0 +1,297 @@
+name: Build and Push Docker Image
+
+on:
+  schedule:
+    # Run daily at 06:00 UTC to detect new upstream FileKey releases
+    - cron: '0 6 * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - 'Dockerfile'
+      - 'nginx.conf'
+      - '.github/workflows/build-and-push.yml'
+  workflow_dispatch:
+    inputs:
+      filekey_ref:
+        description: 'Upstream FileKey git ref (tag or commit SHA) to build'
+        required: false
+        default: ''
+      force_build:
+        description: 'Force build even if no new release detected'
+        required: false
+        type: boolean
+        default: false
+      virustotal_scan:
+        description: 'Run VirusTotal scan on the built image tarball'
+        required: false
+        type: boolean
+        default: false
+
+# Explicit least-privilege permissions
+permissions:
+  contents: read
+  packages: write
+  id-token: write   # Required for Cosign keyless OIDC signing
+  attestations: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/lrgabriel/dockerized_filekey
+  UPSTREAM_REPO: nicholaswilde/filekey
+
+jobs:
+  # ──────────────────────────────────────────────────────────
+  # Job 1: Detect whether a new upstream release is available
+  # ──────────────────────────────────────────────────────────
+  detect-release:
+    name: Detect Upstream Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      new_release: ${{ steps.check.outputs.new_release }}
+      upstream_ref: ${{ steps.check.outputs.upstream_ref }}
+      upstream_sha: ${{ steps.check.outputs.upstream_sha }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check for new upstream release
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          INPUT_REF: ${{ inputs.filekey_ref }}
+          FORCE_BUILD: ${{ inputs.force_build }}
+        run: |
+          set -euo pipefail
+
+          # If a specific ref was supplied via workflow_dispatch, use it directly
+          if [ -n "${INPUT_REF:-}" ]; then
+            echo "Using manually supplied ref: ${INPUT_REF}"
+            echo "new_release=true"             >> "$GITHUB_OUTPUT"
+            echo "upstream_ref=${INPUT_REF}"    >> "$GITHUB_OUTPUT"
+            echo "upstream_sha=${INPUT_REF}"    >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Fetch latest upstream release tag
+          LATEST_TAG=$(gh api "repos/${UPSTREAM_REPO}/releases/latest" \
+            --jq '.tag_name' 2>/dev/null || echo "")
+
+          if [ -z "${LATEST_TAG}" ]; then
+            # Fall back to latest commit on default branch if no releases exist
+            LATEST_TAG=$(gh api "repos/${UPSTREAM_REPO}/commits/HEAD" \
+              --jq '.sha[:8]' 2>/dev/null || echo "main")
+          fi
+
+          echo "Latest upstream ref: ${LATEST_TAG}"
+
+          # Retrieve the last built ref from the most recent package version tag
+          LAST_BUILT=$(gh api "repos/${{ github.repository }}/packages/container/dockerized_filekey/versions" \
+            --jq '.[0].metadata.container.tags[]' 2>/dev/null \
+            | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}-' | head -1 || echo "")
+
+          echo "Last built ref: ${LAST_BUILT}"
+
+          if [ "${FORCE_BUILD}" = "true" ] || [ "${LATEST_TAG}" != "${LAST_BUILT##*-}" ]; then
+            echo "new_release=true"             >> "$GITHUB_OUTPUT"
+          else
+            echo "new_release=false"            >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "upstream_ref=${LATEST_TAG}"     >> "$GITHUB_OUTPUT"
+          echo "upstream_sha=${LATEST_TAG}"     >> "$GITHUB_OUTPUT"
+
+  # ──────────────────────────────────────────────────────────
+  # Job 2: Build multi-arch image and push to GHCR
+  #
+  # Building both platforms in a single job ensures that
+  # build-push-action produces a single multi-arch manifest
+  # list with one unambiguous digest, which is then passed
+  # to the sign-image job.
+  # ──────────────────────────────────────────────────────────
+  build-and-push:
+    name: Build & Push (multi-arch)
+    needs: detect-release
+    if: needs.detect-release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      image_digest: ${{ steps.push.outputs.digest }}
+      image_tags: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set up QEMU (for cross-platform builds)
+        uses: docker/setup-qemu-action@49b3bc8e6bdd4a60e6116a5414239cba5943d3cf # v3.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb1ffdef0 # v3.6.1
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@8e5442c4ef9f78752691e2d8f8d19755c6f78e81 # v5.5.1
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value={{date 'YYYY-MM-DD'}}
+            type=raw,value={{date 'YYYY-MM-DD'}}-{{sha}}
+          labels: |
+            org.opencontainers.image.title=dockerized_filekey
+            org.opencontainers.image.description=FileKey PWA served via nginx-alpine
+            org.opencontainers.image.source=https://github.com/lrgabriel/dockerized_filekey
+            org.opencontainers.image.upstream.ref=${{ needs.detect-release.outputs.upstream_ref }}
+
+      - name: Build and push multi-arch image
+        id: push
+        uses: docker/build-push-action@4f58ea79222b3b9dc2c8bbdd6debcef730109a75 # v6.9.0
+        with:
+          context: .
+          file: Dockerfile
+          # Both platforms built in one step → single manifest list + one digest
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            FILEKEY_REF=${{ needs.detect-release.outputs.upstream_ref }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true
+
+      - name: Generate build manifest
+        run: |
+          # Use jq (pre-installed on ubuntu-latest) for reliable JSON construction
+          jq -n \
+            --arg build_date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg platform "linux/amd64,linux/arm64" \
+            --arg image "${{ env.IMAGE_NAME }}" \
+            --arg digest "${{ steps.push.outputs.digest }}" \
+            --arg upstream_repo "${{ env.UPSTREAM_REPO }}" \
+            --arg upstream_ref "${{ needs.detect-release.outputs.upstream_ref }}" \
+            --arg upstream_sha "${{ needs.detect-release.outputs.upstream_sha }}" \
+            --arg workflow_run_id "${{ github.run_id }}" \
+            --arg workflow_sha "${{ github.sha }}" \
+            --argjson tags "$(echo '${{ steps.meta.outputs.tags }}' | jq -R '[split("\n")[]]')" \
+            '{
+              build_date: $build_date,
+              platform: $platform,
+              image: $image,
+              digest: $digest,
+              upstream_repo: $upstream_repo,
+              upstream_ref: $upstream_ref,
+              upstream_sha: $upstream_sha,
+              workflow_run_id: $workflow_run_id,
+              workflow_sha: $workflow_sha,
+              tags: $tags
+            }' > build-manifest.json
+          cat build-manifest.json
+
+      - name: Upload build manifest as artifact
+        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        with:
+          name: build-manifest
+          path: build-manifest.json
+          retention-days: 90
+
+  # ──────────────────────────────────────────────────────────
+  # Job 3: Sign image with Cosign (keyless, via GitHub OIDC)
+  # ──────────────────────────────────────────────────────────
+  sign-image:
+    name: Sign Image with Cosign
+    needs:
+      - detect-release
+      - build-and-push
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      id-token: write   # Required for Cosign keyless OIDC
+    steps:
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@59acb6260d9c0ba8f4a2f9d9b48431a222b68e20 # v3.5.0
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sign image with Cosign (keyless)
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+          IMAGE_DIGEST: ${{ needs.build-and-push.outputs.image_digest }}
+        run: |
+          cosign sign --yes \
+            "${{ env.IMAGE_NAME }}@${IMAGE_DIGEST}"
+
+      - name: Verify Cosign signature
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+          IMAGE_DIGEST: ${{ needs.build-and-push.outputs.image_digest }}
+        run: |
+          cosign verify \
+            --certificate-identity-regexp="https://github.com/lrgabriel/dockerized_filekey/.*" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com" \
+            "${{ env.IMAGE_NAME }}@${IMAGE_DIGEST}"
+
+  # ──────────────────────────────────────────────────────────
+  # Job 4: Optional VirusTotal scan
+  # ──────────────────────────────────────────────────────────
+  virustotal-scan:
+    name: VirusTotal Scan
+    needs:
+      - detect-release
+      - build-and-push
+    # Only run when explicitly requested via workflow_dispatch
+    if: ${{ inputs.virustotal_scan == true && needs.detect-release.outputs.new_release == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      packages: read
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export amd64 image tarball for scanning
+        env:
+          IMAGE_DIGEST: ${{ needs.build-and-push.outputs.image_digest }}
+        run: |
+          docker pull --platform linux/amd64 "${{ env.IMAGE_NAME }}@${IMAGE_DIGEST}"
+          docker save "${{ env.IMAGE_NAME }}@${IMAGE_DIGEST}" \
+            -o image-scan.tar
+
+      - name: Submit tarball to VirusTotal
+        # Requires VT_API_KEY secret to be configured in repository settings
+        env:
+          VT_API_KEY: ${{ secrets.VT_API_KEY }}
+        run: |
+          if [ -z "${VT_API_KEY}" ]; then
+            echo "::warning::VT_API_KEY secret is not set. Skipping VirusTotal scan."
+            exit 0
+          fi
+          RESPONSE=$(curl --silent --request POST \
+            "https://www.virustotal.com/api/v3/files" \
+            --header "x-apikey: ${VT_API_KEY}" \
+            --form "file=@image-scan.tar")
+          echo "VirusTotal submission response: ${RESPONSE}"
+          ANALYSIS_ID=$(echo "${RESPONSE}" | jq -r '.data.id')
+          echo "Analysis ID: ${ANALYSIS_ID}"
+          echo "View results at: https://www.virustotal.com/gui/file-analysis/${ANALYSIS_ID}"
