@@ -1,7 +1,4 @@
 # FileKey Docker images — standard ignores
-.git
-.github
-*.md
 *.log
 *.tmp
 node_modules
