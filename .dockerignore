@@ -1,16 +1,14 @@
 # Ignored files for Docker build
 
-# Ignore the .git directory
-.git/
+# Version control
+.git
+.github
 
-# Ignore node modules
-node_modules/
+# Node
+node_modules
 
-# Ignore Dockerfile itself
-Dockerfile
-
-# Ignore other development files
+# Development files
 *.log
 *.tmp
 *.md
-*.json
+.gitignore
