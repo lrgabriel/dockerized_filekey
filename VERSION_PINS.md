@@ -7,10 +7,13 @@ digests or commit SHAs to guarantee reproducible, auditable builds.
 
 | Stage   | Image              | Tag           | Digest                                                                   | Pinned On  |
 |---------|--------------------|---------------|--------------------------------------------------------------------------|------------|
-| Build   | `alpine`           | `3.23.3`      | `sha256:25109184c71bdad752c8312a8623239686a9a2071e8825f20acb8f2198c3f659` | 2026-03-09 |
 | Runtime | `nginx`            | `stable-alpine`| `sha256:15e96e59aa3b0aada3a121296e3bce117721f42d88f5f64217ef4b18f458c6ab` | 2026-03-09 |
 
 ## Upstream Source
+
+`RockwellShah/filekey` is tracked as a git submodule (see `.gitmodules`). The
+submodule reference pins the exact commit SHA being built. Dependabot opens PRs
+when new commits appear on the upstream `main` branch.
 
 | Dependency               | Repository                                         | Commit SHA                                 | Commit Date | Pinned On  |
 |--------------------------|----------------------------------------------------|--------------------------------------------|-------------|------------|
@@ -18,11 +21,17 @@ digests or commit SHAs to guarantee reproducible, auditable builds.
 
 ## How to Update
 
-When newer versions are available:
+### Docker base images
 
 1. Find the new image digest from Docker Hub (Tags tab → click tag → copy Digest).
 2. Update the relevant `FROM` line in `Dockerfile`.
 3. Update the table above with the new digest and today's date.
-4. For `RockwellShah/filekey`, find the commit SHA from
-   https://github.com/RockwellShah/filekey/commits/main, update the
-   `git checkout` line in `Dockerfile`, and update the table above.
+
+### RockwellShah/filekey upstream
+
+Dependabot creates a PR automatically when new commits are available. To update
+manually:
+
+1. Run `git submodule update --remote filekey` to fetch the latest commit.
+2. Run `git add filekey` and commit the result.
+3. The workflow will verify the new commit's GPG signature before building.

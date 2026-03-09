@@ -1,0 +1,7 @@
+# filekey is tracked as a git submodule so Dependabot can monitor upstream commits.
+# When RockwellShah/filekey publishes new commits, Dependabot opens a PR to update
+# the pinned submodule reference, which triggers the verification workflow on merge.
+[submodule "filekey"]
+	path = filekey
+	url = https://github.com/RockwellShah/filekey.git
+	branch = main
