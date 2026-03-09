@@ -1,0 +1,48 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "enabled": true,
+  "extends": ["config:recommended"],
+  "schedule": ["at 3am"],
+  "prConcurrentLimit": 0,
+  "prHourlyLimit": 0,
+  "automerge": false,
+  "github-actions": {
+    "fileMatch": ["\\.github/workflows/build-and-push\\.yml$"]
+  },
+  "dockerfile": {
+    "fileMatch": ["^Dockerfile$"]
+  },
+  "packageRules": [
+    {
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "groupName": "GitHub Actions"
+    },
+    {
+      "matchManagers": ["dockerfile"],
+      "pinDigests": true,
+      "groupName": "Docker base images"
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["RockwellShah/filekey"],
+      "groupName": "FileKey upstream",
+      "prBodyNotes": [
+        "### Upstream\n- Repository: [RockwellShah/filekey](https://github.com/RockwellShah/filekey)\n- [View commits on main](https://github.com/RockwellShah/filekey/commits/main)"
+      ]
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["^Dockerfile$"],
+      "matchStrings": [
+        "https://github\\.com/RockwellShah/filekey\\.git\\s+(?<currentDigest>[a-f0-9]{40})"
+      ],
+      "currentValueTemplate": "main",
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/RockwellShah/filekey.git",
+      "depNameTemplate": "RockwellShah/filekey"
+    }
+  ]
+}
