@@ -1,0 +1,33 @@
+version: 2
+updates:
+  # Monitor RockwellShah/filekey for new commits via git submodule.
+  # Dependabot opens a PR when the submodule's upstream branch advances,
+  # giving the maintainer a chance to review before merging.
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "chore(submodule)"
+
+  # Monitor GitHub Actions pinned to commit SHAs for security updates.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "chore(actions)"
+
+  # Monitor Docker base images for digest updates.
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+      time: "03:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "chore(docker)"

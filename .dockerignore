@@ -3,6 +3,7 @@
 # Version control
 .git
 .github
+.gitmodules
 
 # Node
 node_modules
