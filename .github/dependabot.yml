@@ -21,6 +21,7 @@ updates:
       timezone: "UTC"
     commit-message:
       prefix: "chore(actions)"
+    pin-dependencies: true
 
   # Monitor Docker base images for digest updates.
   - package-ecosystem: "docker"
