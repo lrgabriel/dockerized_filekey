@@ -12,6 +12,9 @@ permissions:
   contents: write
   packages: write
 
+env:
+  FILEKEY_EXPECTED_REPO_ID: 977171031
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -19,6 +22,46 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Verify upstream FileKey repository
+        run: |
+          echo "Fetching RockwellShah/filekey repository metadata..."
+          REPO_JSON=$(curl -sf https://api.github.com/repos/RockwellShah/filekey) || {
+            echo "ERROR: Failed to fetch repository metadata from GitHub API" >&2
+            exit 1
+          }
+
+          IFS=$'\t' read -r OWNER ARCHIVED DISABLED REPO_ID <<< \
+            "$(echo "$REPO_JSON" | jq -r '[.owner.login, (.archived|tostring), (.disabled|tostring), (.id|tostring)] | @tsv')"
+
+          FAIL=0
+
+          if [ "$OWNER" != "RockwellShah" ]; then
+            echo "ERROR: Repository owner is '$OWNER', expected 'RockwellShah'" >&2
+            FAIL=1
+          fi
+
+          if [ "$ARCHIVED" != "false" ]; then
+            echo "ERROR: Repository is archived" >&2
+            FAIL=1
+          fi
+
+          if [ "$DISABLED" != "false" ]; then
+            echo "ERROR: Repository is disabled" >&2
+            FAIL=1
+          fi
+
+          if [ "$REPO_ID" != "$FILEKEY_EXPECTED_REPO_ID" ]; then
+            echo "ERROR: Repository ID is '$REPO_ID', expected '$FILEKEY_EXPECTED_REPO_ID'" >&2
+            FAIL=1
+          fi
+
+          if [ "$FAIL" -ne 0 ]; then
+            echo "Upstream repository verification FAILED. Aborting build." >&2
+            exit 1
+          fi
+
+          echo "Upstream repository verified: owner=$OWNER, id=$REPO_ID, archived=$ARCHIVED, disabled=$DISABLED"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
