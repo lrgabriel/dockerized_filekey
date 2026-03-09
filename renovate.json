@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "schedule": ["before 3am"],
+  "timezone": "UTC",
+  "automerge": false,
+  "vulnerabilityAlerts": {
+    "enabled": false
+  },
+  "pinDigests": true,
+  "executionTimeout": 60,
+  "customManagers": [
+    {
+      "customType": "regex",
+      "fileMatch": ["(^|/)Dockerfile$"],
+      "matchStrings": [
+        "git fetch --depth 1 https://github\\.com/RockwellShah/filekey\\.git (?<currentDigest>[a-f0-9]{40})"
+      ],
+      "depNameTemplate": "RockwellShah/filekey",
+      "datasourceTemplate": "git-refs",
+      "packageNameTemplate": "https://github.com/RockwellShah/filekey.git",
+      "currentValueTemplate": "main"
+    }
+  ],
+  "packageRules": [
+    {
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "minor and patch updates"
+    },
+    {
+      "matchManagers": ["custom.regex"],
+      "matchPackageNames": ["RockwellShah/filekey"],
+      "commitMessageTopic": "RockwellShah/filekey upstream commit",
+      "prBodyNotes": [
+        "📦 **Upstream Repository:** [RockwellShah/filekey](https://github.com/RockwellShah/filekey)",
+        "🔗 **Recent commits:** [View on GitHub](https://github.com/RockwellShah/filekey/commits/main)",
+        "🔍 **Commit diff:** [Compare changes](https://github.com/RockwellShah/filekey/compare/{{currentDigest}}...{{newDigest}})"
+      ]
+    }
+  ]
+}
