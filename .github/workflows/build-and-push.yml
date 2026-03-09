@@ -24,6 +24,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
 
       - name: Verify upstream FileKey repository
+        id: verify-repo
         run: |
           echo "Fetching RockwellShah/filekey repository metadata..."
           REPO_JSON=$(curl -sf https://api.github.com/repos/RockwellShah/filekey) || {
@@ -62,6 +63,48 @@ jobs:
           fi
 
           echo "Upstream repository verified: owner=$OWNER, id=$REPO_ID, archived=$ARCHIVED, disabled=$DISABLED"
+          echo "owner=$OWNER" >> "$GITHUB_OUTPUT"
+          echo "repo_id=$REPO_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Verify commit signature
+        id: verify-commit
+        run: |
+          echo "Fetching commit metadata for RockwellShah/filekey main branch..."
+          COMMIT_JSON=$(curl -sf https://api.github.com/repos/RockwellShah/filekey/commits/main) || {
+            echo "ERROR: Failed to fetch commit metadata from GitHub API" >&2
+            exit 1
+          }
+
+          VERIFIED=$(echo "$COMMIT_JSON" | jq -r '.commit.verification.verified')
+          REASON=$(echo "$COMMIT_JSON" | jq -r '.commit.verification.reason')
+          COMMIT_SHA=$(echo "$COMMIT_JSON" | jq -r '.sha')
+          AUTHOR_NAME=$(echo "$COMMIT_JSON" | jq -r '.commit.author.name')
+          AUTHOR_EMAIL=$(echo "$COMMIT_JSON" | jq -r '.commit.author.email')
+          COMMIT_DATE=$(echo "$COMMIT_JSON" | jq -r '.commit.author.date')
+
+          echo "Commit SHA:  $COMMIT_SHA"
+          echo "Author:      $AUTHOR_NAME <$AUTHOR_EMAIL>"
+          echo "Commit date: $COMMIT_DATE"
+          echo "Verified:    $VERIFIED"
+          echo "Reason:      $REASON"
+
+          if [ "$VERIFIED" != "true" ]; then
+            echo "ERROR: Commit is not verified by GitHub (verified=$VERIFIED, reason=$REASON)" >&2
+            exit 1
+          fi
+
+          if [ "$REASON" != "valid" ]; then
+            echo "ERROR: Commit signature reason is not 'valid' (reason=$REASON)" >&2
+            exit 1
+          fi
+
+          echo "Commit signature verification PASSED"
+          echo "commit_sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "author_name=$AUTHOR_NAME" >> "$GITHUB_OUTPUT"
+          echo "author_email=$AUTHOR_EMAIL" >> "$GITHUB_OUTPUT"
+          echo "commit_date=$COMMIT_DATE" >> "$GITHUB_OUTPUT"
+          echo "verified=$VERIFIED" >> "$GITHUB_OUTPUT"
+          echo "reason=$REASON" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -92,9 +135,36 @@ jobs:
         id: timestamp
         run: echo "ts=$(date -u '+%Y-%m-%d %H:%M:%S UTC')" >> "$GITHUB_OUTPUT"
 
+      - name: Build release notes
+        run: |
+          {
+            echo "## FileKey v${{ inputs.version }}"
+            echo ""
+            echo "### 🔒 Security Verification"
+            echo ""
+            echo "#### Repository Verification ([RockwellShah/filekey](https://github.com/RockwellShah/filekey))"
+            echo "- ✅ Owner: \`${{ steps.verify-repo.outputs.owner }}\` (expected: \`RockwellShah\`)"
+            echo "- ✅ Repository ID: \`${{ steps.verify-repo.outputs.repo_id }}\` (expected: \`${{ env.FILEKEY_EXPECTED_REPO_ID }}\`)"
+            echo "- ✅ Not archived"
+            echo "- ✅ Not disabled"
+            echo ""
+            echo "#### Commit Signature Verification"
+            echo "- ✅ GitHub verified: \`${{ steps.verify-commit.outputs.verified }}\`"
+            echo "- ✅ Signature reason: \`${{ steps.verify-commit.outputs.reason }}\`"
+            echo ""
+            echo "#### Commit Details"
+            echo "- 🔑 SHA: \`${{ steps.verify-commit.outputs.commit_sha }}\`"
+            echo "- 👤 Author: ${{ steps.verify-commit.outputs.author_name }} \`<${{ steps.verify-commit.outputs.author_email }}>\`"
+            echo "- 📅 Commit date: \`${{ steps.verify-commit.outputs.commit_date }}\`"
+            echo ""
+            echo "### 📋 Build Info"
+            echo "- 🕐 Built: \`${{ steps.timestamp.outputs.ts }}\`"
+            echo "- 🔢 Workflow run: \`${{ github.run_id }}\`"
+          } > /tmp/release-notes.md
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@c95fe1489396fe8a9eb87c0abf8aa5b2ef267fda  # v2.2.1
         with:
           tag_name: v${{ inputs.version }}
           name: FileKey v${{ inputs.version }}
-          body: "Built: ${{ steps.timestamp.outputs.ts }}"
+          body_path: /tmp/release-notes.md
